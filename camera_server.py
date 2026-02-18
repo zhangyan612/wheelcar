@@ -52,11 +52,8 @@ def generate_frames():
         
         # Yield MJPEG frame
         frame_bytes = buffer.tobytes()
-        yield (b'--frame
-'
-               b'Content-Type: image/jpeg
-
-' + frame_bytes + b'\r\n')
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     
     camera.release()
 
