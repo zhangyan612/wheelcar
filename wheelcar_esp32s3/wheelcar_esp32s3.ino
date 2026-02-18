@@ -1,60 +1,33 @@
 /*
- * ESP32-WROVER Wheelcar Controller
+ * ESP32-S3-N8R2 Wheelcar Controller
  * Features:
  * - 4 Relay control (Forward, Backward, Left, Right)
- * - Camera streaming (OV2640)
  * - Servo control (PWM)
- * - Web interface
+ * - Web interface (no camera)
  */
 
 #include <WiFi.h>
 #include <WebServer.h>
-#include <esp_camera.h>
 #include <ESP32Servo.h>
 
 // ===================
 // WiFi Configuration
 // ===================
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "Verizon_YGCW99";
+const char* password = "yon4-ewer-holly";
 
 // ===================
-// Relay GPIO Pins (Freenove ESP32-Wrover CAM)
-// Camera uses: 4,5,18,19,21,22,23,25,26,27,34,35,36,39
-// Avoid strapping pins: 0, 2, 12, 15 (can affect boot)
-// Safe GPIOs: 13, 14, 32, 33
+// Relay GPIO Pins (ESP32-S3 safe pins)
 // ===================
-#define RELAY_FORWARD  33  // 前进
-#define RELAY_BACKWARD 32  // 后退
-#define RELAY_LEFT     14  // 左转
-#define RELAY_RIGHT    13  // 右转
+#define RELAY_FORWARD  4   // 前进
+#define RELAY_BACKWARD 5   // 后退
+#define RELAY_LEFT     6   // 左转
+#define RELAY_RIGHT    7   // 右转
 
 // ===================
 // Servo Configuration
-// GPIO 2 is strapping pin but OK for servo (not driven low at boot)
 // ===================
-#define SERVO_PIN 2
-
-// ===================
-// Camera Pins (ESP32-WROVER-KIT with OV2640)
-// ===================
-#define PWDN_GPIO_NUM    -1
-#define RESET_GPIO_NUM   -1
-#define XCLK_GPIO_NUM    21
-#define SIOD_GPIO_NUM    26
-#define SIOC_GPIO_NUM    27
-
-#define Y9_GPIO_NUM      35
-#define Y8_GPIO_NUM      34
-#define Y7_GPIO_NUM      39
-#define Y6_GPIO_NUM      36
-#define Y5_GPIO_NUM      19
-#define Y4_GPIO_NUM      18
-#define Y3_GPIO_NUM       5
-#define Y2_GPIO_NUM       4
-#define VSYNC_GPIO_NUM   25
-#define HREF_GPIO_NUM    23
-#define PCLK_GPIO_NUM    22
+#define SERVO_PIN 8
 
 // ===================
 // Global Objects
@@ -64,40 +37,7 @@ Servo myServo;
 int servoAngle = 90;
 
 // ===================
-// Camera Configuration
-// ===================
-camera_config_t camera_config = {
-    .pin_pwdn = PWDN_GPIO_NUM,
-    .pin_reset = RESET_GPIO_NUM,
-    .pin_xclk = XCLK_GPIO_NUM,
-    .pin_sscb_sda = SIOD_GPIO_NUM,
-    .pin_sscb_scl = SIOC_GPIO_NUM,
-
-    .pin_d7 = Y9_GPIO_NUM,
-    .pin_d6 = Y8_GPIO_NUM,
-    .pin_d5 = Y7_GPIO_NUM,
-    .pin_d4 = Y6_GPIO_NUM,
-    .pin_d3 = Y5_GPIO_NUM,
-    .pin_d2 = Y4_GPIO_NUM,
-    .pin_d1 = Y3_GPIO_NUM,
-    .pin_d0 = Y2_GPIO_NUM,
-    .pin_vsync = VSYNC_GPIO_NUM,
-    .pin_href = HREF_GPIO_NUM,
-    .pin_pclk = PCLK_GPIO_NUM,
-
-    .xclk_freq_hz = 20000000,
-    .ledc_timer = LEDC_TIMER_0,
-    .ledc_channel = LEDC_CHANNEL_0,
-
-    .pixel_format = PIXFORMAT_JPEG,
-    .frame_size = FRAMESIZE_QVGA,    // 320x240
-    .jpeg_quality = 12,
-    .fb_count = 2,
-    .fb_location = CAMERA_FB_IN_PSRAM
-};
-
-// ===================
-// HTML Web Interface (embedded)
+// HTML Web Interface
 // ===================
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -131,21 +71,12 @@ const char index_html[] PROGMEM = R"rawliteral(
             margin-bottom: 15px;
             font-size: 1.5em;
         }
-        .camera-section {
-            text-align: center;
-            margin-bottom: 15px;
-        }
-        .camera-section img {
-            width: 100%;
-            max-width: 400px;
-            border-radius: 10px;
-            border: 3px solid #0f3460;
-        }
         .control-section {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 10px;
+            margin-top: 30px;
         }
         .control-row {
             display: flex;
@@ -153,9 +84,9 @@ const char index_html[] PROGMEM = R"rawliteral(
             gap: 10px;
         }
         .btn {
-            width: 80px;
-            height: 80px;
-            font-size: 1.2em;
+            width: 90px;
+            height: 90px;
+            font-size: 1.3em;
             font-weight: bold;
             border: none;
             border-radius: 15px;
@@ -175,59 +106,56 @@ const char index_html[] PROGMEM = R"rawliteral(
         .btn-stop { background: linear-gradient(145deg, #fdcb6e, #f39c12); color: #2d3436; }
         .btn-empty { visibility: hidden; }
         .servo-section {
-            margin-top: 20px;
+            margin-top: 30px;
             text-align: center;
             background: rgba(255,255,255,0.05);
-            padding: 15px;
+            padding: 20px;
             border-radius: 10px;
         }
         .servo-section h3 {
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
         .slider-container {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
             justify-content: center;
         }
         input[type="range"] {
-            width: 200px;
-            height: 8px;
+            width: 250px;
+            height: 10px;
             -webkit-appearance: none;
             background: #0f3460;
-            border-radius: 4px;
+            border-radius: 5px;
             outline: none;
         }
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 24px;
-            height: 24px;
+            width: 28px;
+            height: 28px;
             background: #00b894;
             border-radius: 50%;
             cursor: pointer;
         }
         .angle-display {
-            font-size: 1.2em;
+            font-size: 1.4em;
             font-weight: bold;
-            min-width: 50px;
+            min-width: 70px;
+            text-align: center;
         }
         .status {
             text-align: center;
-            margin-top: 15px;
-            padding: 10px;
+            margin-top: 20px;
+            padding: 15px;
             background: rgba(0,0,0,0.3);
             border-radius: 8px;
-            font-size: 0.9em;
+            font-size: 1.1em;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🚗 Wheelcar Controller</h1>
-        
-        <div class="camera-section">
-            <img id="camera" src="" alt="Camera Stream">
-        </div>
         
         <div class="control-section">
             <div class="control-row">
@@ -263,12 +191,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     
     <script>
-        var cameraInterval;
-        
-        function startCamera() {
-            document.getElementById('camera').src = '/stream';
-        }
-        
         function control(action) {
             fetch('/control?action=' + action)
                 .then(response => response.text())
@@ -285,27 +207,10 @@ const char index_html[] PROGMEM = R"rawliteral(
             fetch('/servo?angle=' + angle)
                 .catch(err => console.log('Error:', err));
         }
-        
-        // Start camera on page load
-        window.onload = function() {
-            startCamera();
-        };
     </script>
 </body>
 </html>
 )rawliteral";
-
-// ===================
-// Initialize Camera
-// ===================
-bool initCamera() {
-    esp_err_t err = esp_camera_init(&camera_config);
-    if (err != ESP_OK) {
-        Serial.printf("Camera init failed with error 0x%x", err);
-        return false;
-    }
-    return true;
-}
 
 // ===================
 // Relay Control Functions
@@ -370,65 +275,13 @@ void handleServo() {
 }
 
 // ===================
-// Handle Camera Stream (Single JPEG capture)
-// ===================
-void handleStream() {
-    camera_fb_t * fb = esp_camera_fb_get();
-    if (!fb) {
-        server.send(500, "text/plain", "Camera capture failed");
-        return;
-    }
-    
-    // Build HTTP response header
-    String header = "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: image/jpeg\r\n"
-                    "Content-Length: " + String(fb->len) + "\r\n"
-                    "Connection: close\r\n\r\n";
-    
-    server.client().write(header.c_str());
-    server.client().write((const char*)fb->buf, fb->len);
-    
-    esp_camera_fb_return(fb);
-}
-
-// ===================
-// MJPEG Streaming (Continuous)
-// ===================
-void handleMJPEGStream() {
-    camera_fb_t * fb = NULL;
-    
-    String response = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
-                      "Connection: close\r\n\r\n";
-    
-    server.client().write(response.c_str());
-    
-    while (server.client().connected()) {
-        fb = esp_camera_fb_get();
-        if (!fb) {
-            Serial.println("Camera capture failed");
-            break;
-        }
-        
-        String header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\n\r\n";
-        server.client().write(header.c_str());
-        server.client().write((const char*)fb->buf, fb->len);
-        server.client().write("\r\n");
-        
-        esp_camera_fb_return(fb);
-        fb = NULL;
-        
-        delay(30);  // ~30fps
-    }
-}
-
-// ===================
 // Setup
 // ===================
 void setup() {
     Serial.begin(115200);
-    Serial.setDebugOutput(true);
+    delay(1000);
     Serial.println();
+    Serial.println("Starting Wheelcar Controller...");
     
     // Initialize relay pins
     pinMode(RELAY_FORWARD, OUTPUT);
@@ -442,13 +295,6 @@ void setup() {
     myServo.attach(SERVO_PIN);
     myServo.write(servoAngle);
     Serial.println("Servo initialized");
-    
-    // Initialize camera
-    if (!initCamera()) {
-        Serial.println("Camera initialization failed!");
-    } else {
-        Serial.println("Camera initialized");
-    }
     
     // Connect to WiFi
     WiFi.begin(ssid, password);
@@ -465,8 +311,6 @@ void setup() {
     server.on("/", handleRoot);
     server.on("/control", handleControl);
     server.on("/servo", handleServo);
-    server.on("/stream", handleMJPEGStream);
-    server.on("/capture", handleStream);
     
     // Start server
     server.begin();
@@ -479,5 +323,5 @@ void setup() {
 // ===================
 void loop() {
     server.handleClient();
-    delay(2);  // Small delay for stability
+    delay(2);
 }
