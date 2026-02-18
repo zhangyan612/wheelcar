@@ -2,6 +2,19 @@
 simple kids power wheel control module
 
 
+
+
+wifi Verizon_YGCW99
+yon4-ewer-holly
+
+
+
+
+
+
+
+
+
 UP Board Series is a credit-card sized board with the high performance and low power consumption features of the latest tablet technology: the Intel® ATOM™ x5-Z8350 Processors 64 bits up to 1.92GHz. The internal GPU is the new Intel Gen 8 HD 400 with 12 Execution Units up to 500MHz to deliver extremely high 3D graphic performance. UP is equipped with 2GB/4GB DDR3L RAM and 16GB/32GB eMMC.
 
 Hardware overview

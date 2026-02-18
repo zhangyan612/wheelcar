@@ -173,3 +173,295 @@ finally:
 *   如果是这样，你需要把代码里的 `GPIO.HIGH` 和 `GPIO.LOW` 互换一下。
 
 先去接电源线吧，如果线太乱，记得用胶带捆一下，别让正负极碰到一起短路了！
+
+
+
+
+
+
+
+
+To access the 40-pin GPIO header on an UP Board (CHT01) running Windows using C# or C++, you must use the proprietary UP Framework and AAEON Hi-Safe drivers. Standard libraries like System.Device.Gpio often fail on standard Windows 10/11 versions without these specific vendor translations. 
+1. Required Software Installation 
+You cannot access the pins until the low-level hardware bridge is established:
+UP Framework: Download and install the UP SDK for Windows 10/IoT. This installs the "UP Framework Service" required for GPIO communication.
+Hi-Safe API: AAEON provides the Hi-Safe SDK, which includes the necessary DLLs (aaeonEapi.dll) to interface with the Digital I/O. 
+AAEON
+AAEON
+ +3
+2. Implementation in C# (Universal Windows Platform or .NET)
+For C#, the most reliable method is using the UP Demo App source code as a template:
+Reference DLLs: Add a reference to the aaeonEapi.dll provided in the SDK.
+Import Functions: Use P/Invoke to import the GPIO control functions from the DLL.
+csharp
+[DllImport("aaeonEapi.dll")]
+public static extern uint EApiGPIOGetDirection(uint Id, uint Bitmask, out uint pDirection);
+
+[DllImport("aaeonEapi.dll")]
+public static extern uint EApiGPIOSetLevel(uint Id, uint Bitmask, uint Level);
+Use code with caution.
+
+App Permissions: If using UWP, ensure the lowLevelDevices capability is enabled in your Package.appxmanifest. 
+3. Implementation in C++
+C++ development is more direct as you can link against the header files provided in the AAEON Hi-Safe SDK:
+Include Headers: Use the EApi.h header found in the SDK's Include directory.
+Link Library: Link your project against aaeonEapi.lib.
+Example Code:
+cpp
+#include "EApi.h"
+// Initialize the API
+EApiLibInitialize();
+// Set Pin 0 (mapped to Header Pin 7) to Output
+EApiGPIOSetDirection(EAPI_ID_GPIO_BITMASK_0, 0xFFFFFFFF, EAPI_GPIO_LOW);
+// Write High
+EApiGPIOSetLevel(EAPI_ID_GPIO_BITMASK_0, 0xFFFFFFFF, EAPI_GPIO_HIGH);
+Use code with caution.
+
+4. Critical Hardware Configuration
+BIOS Settings: You must often enable "HAT Configuration" in the BIOS (Advanced > HAT Configuration) and set the specific pins to "GPIO" mode rather than their alternate functions (like I2C or UART).
+Pin Mapping: The software "ID" (e.g., GPIO 0) does not match the physical pin number (e.g., Pin 7). Refer to the UP-CHT01 Pinout Guide for the mapping table. 
+Annabooks
+Annabooks
+ +1
+Would you like a link to the specific pin mapping table for the 40-pin header to see which software ID corresponds to which physical pin?
+
+
+
+
+undefined
+undefined
+undefined
+11 sites
+AAEON Hi-Safe
+The AAEON Hi-Safe program offers a user-friendly interface to allow users ease in monitoring their devices. The AAEON Hi-Safe is a...
+
+AAEON
+
+UP Board Windows - UP Community
+Answered 112 views 5 comments Most recent by rsramirez001 April 2023. GPIO on WinIoT Core Upboard. Answered 134 views 2 comments M...
+
+UP Bridge the Gap
+
+UP SDK for Windows 10 and Windows IoT - UP Shop
+Up squared A1.0 A1.1 board I2C pins can't override to GPIO function. 2. Up board SPI bus not working. 3. Up squared GPIO output st...
+
+UP-SHOP.ORG
+Show all
+
+
+
+
+how to run c# or c++ for gpio access on this device?
+To access the 40-pin GPIO header on an UP Board (CHT01) running Windows using C# or C++, you must use the proprietary UP Framework and AAEON Hi-Safe drivers. Standard libraries like System.Device.Gpio often fail on standard Windows 10/11 versions without these specific vendor translations. 
+1. Required Software Installation 
+You cannot access the pins until the low-level hardware bridge is established:
+UP Framework: Download and install the UP SDK for Windows 10/IoT. This installs the "UP Framework Service" required for GPIO communication.
+Hi-Safe API: AAEON provides the Hi-Safe SDK, which includes the necessary DLLs (aaeonEapi.dll) to interface with the Digital I/O. 
+AAEON
+AAEON
+ +3
+2. Implementation in C# (Universal Windows Platform or .NET)
+For C#, the most reliable method is using the UP Demo App source code as a template:
+Reference DLLs: Add a reference to the aaeonEapi.dll provided in the SDK.
+Import Functions: Use P/Invoke to import the GPIO control functions from the DLL.
+csharp
+[DllImport("aaeonEapi.dll")]
+public static extern uint EApiGPIOGetDirection(uint Id, uint Bitmask, out uint pDirection);
+
+[DllImport("aaeonEapi.dll")]
+public static extern uint EApiGPIOSetLevel(uint Id, uint Bitmask, uint Level);
+Use code with caution.
+
+App Permissions: If using UWP, ensure the lowLevelDevices capability is enabled in your Package.appxmanifest. 
+3. Implementation in C++
+C++ development is more direct as you can link against the header files provided in the AAEON Hi-Safe SDK:
+Include Headers: Use the EApi.h header found in the SDK's Include directory.
+Link Library: Link your project against aaeonEapi.lib.
+Example Code:
+cpp
+#include "EApi.h"
+// Initialize the API
+EApiLibInitialize();
+// Set Pin 0 (mapped to Header Pin 7) to Output
+EApiGPIOSetDirection(EAPI_ID_GPIO_BITMASK_0, 0xFFFFFFFF, EAPI_GPIO_LOW);
+// Write High
+EApiGPIOSetLevel(EAPI_ID_GPIO_BITMASK_0, 0xFFFFFFFF, EAPI_GPIO_HIGH);
+Use code with caution.
+
+4. Critical Hardware Configuration
+BIOS Settings: You must often enable "HAT Configuration" in the BIOS (Advanced > HAT Configuration) and set the specific pins to "GPIO" mode rather than their alternate functions (like I2C or UART).
+Pin Mapping: The software "ID" (e.g., GPIO 0) does not match the physical pin number (e.g., Pin 7). Refer to the UP-CHT01 Pinout Guide for the mapping table. 
+Annabooks
+Annabooks
+ +1
+Would you like a link to the specific pin mapping table for the 40-pin header to see which software ID corresponds to which physical pin?
+
+
+
+
+To access the 40-pin GPIO header on an UP Board (CHT01) running Windows, install the UP SDK for Windows 10/IoT, which provides necessary drivers, documentation, and example code. Configure pin functions (GPIO/I2C/SPI/UART) in the BIOS under "Advanced" -> "HAT Configuration". For low-level control, use the RHProxy driver to enable Windows 10 IoT/Windows 10/11 GPIO mapping. 
+Annabooks
+Annabooks
+ +2
+Key Steps for Windows Access:
+BIOS Setup: Upon booting, press F7 to enter the BIOS, navigate to the HAT Configuration menu, and set the desired pins (e.g., GPIO/PWM1) from PWM to GPIO.
+Driver Installation: Download and install the UP SDK from the UP Community downloads page.
+Software Control: Use the provided SDK examples, or access GPIO via Windows.Devices.Gpio namespace in UWP applications.
+Alternative Control: Some users utilize the UP-division pinctrl driver or MRAA library for managing pin states, although this is more common on Linux. 
+Annabooks
+Annabooks
+ +3
+For detailed pin mappings and configurations, refer to the UP Board datasheet, which notes that signals pass through a Lattice FPGA, requiring the correct BIOS configuration. 
+
+
+
+there is no Windows 10 IoT Core in image id, only have windows 8.1
+If you only see Windows 8.1 (or simply "Windows") and Android in the "OS Image ID" menu, your BIOS version is outdated. The specific ACPI tables required for Windows to recognize the GPIO controller via RHPROXY were only added in later firmware updates. 
+1. Update the BIOS 
+To get the "Windows 10 IoT Core" option (which enables GPIO access for all Windows 10/11 versions), you must update your firmware. 
+Check Current Version: Restart and press F7 to enter BIOS. Look for the version number (e.g., UPC1BM0X).
+Download Latest BIOS: Visit the UP Community Downloads and download the latest UEFI BIOS (typically version v1.5 or higher for the CHT01).
+Flash the BIOS: Follow the official BIOS update tutorial to create a bootable EFI shell on a USB drive and run the flash utility. 
+Annabooks
+Annabooks
+ +1
+2. Configure After Update
+Once updated, the "Windows 10 IoT Core" option will appear under the Boot tab. Select it, and then:
+Navigate to Advanced > HAT Configuration.
+Disable the specific protocols (I2C, SPI, PWM) for the pins you want to use as GPIO.
+Enable the Resource Hub Proxy (RHPROXY) if a separate toggle appears. 
+Annabooks
+Annabooks
+ +2
+3. Verify in Windows 10 Home
+Standard Windows 10 Home will now see the pins:
+Open Device Manager.
+Look for Resource Hub Proxy Device under System Devices.
+If it is there, you can now use the UP SDK for Windows to control your pins with a desktop application. 
+Annabooks
+Annabooks
+Warning: Do not attempt to use the GPIO pins without updating the BIOS; the Windows 8.1 setting does not expose the necessary hardware addresses to the Windows 10 kernel for GPIO control. 
+Super User
+Super User
+Would you like the direct link to the specific BIOS file for the CHT01 model?
+
+
+
+
+there is no Windows 10 IoT Core in image id, only have windows 8.1
+If you only see Windows 8.1 (or simply "Windows") and Android in the "OS Image ID" menu, your BIOS version is outdated. The specific ACPI tables required for Windows to recognize the GPIO controller via RHPROXY were only added in later firmware updates. 
+1. Update the BIOS 
+To get the "Windows 10 IoT Core" option (which enables GPIO access for all Windows 10/11 versions), you must update your firmware. 
+Check Current Version: Restart and press F7 to enter BIOS. Look for the version number (e.g., UPC1BM0X).
+Download Latest BIOS: Visit the UP Community Downloads and download the latest UEFI BIOS (typically version v1.5 or higher for the CHT01).
+Flash the BIOS: Follow the official BIOS update tutorial to create a bootable EFI shell on a USB drive and run the flash utility. 
+Annabooks
+Annabooks
+ +1
+2. Configure After Update
+Once updated, the "Windows 10 IoT Core" option will appear under the Boot tab. Select it, and then:
+Navigate to Advanced > HAT Configuration.
+Disable the specific protocols (I2C, SPI, PWM) for the pins you want to use as GPIO.
+Enable the Resource Hub Proxy (RHPROXY) if a separate toggle appears. 
+Annabooks
+Annabooks
+ +2
+3. Verify in Windows 10 Home
+Standard Windows 10 Home will now see the pins:
+Open Device Manager.
+Look for Resource Hub Proxy Device under System Devices.
+If it is there, you can now use the UP SDK for Windows to control your pins with a desktop application. 
+Annabooks
+Annabooks
+Warning: Do not attempt to use the GPIO pins without updating the BIOS; the Windows 8.1 setting does not expose the necessary hardware addresses to the Windows 10 kernel for GPIO control. 
+Super User
+Super User
+Would you like the direct link to the specific BIOS file for the CHT01 model?
+
+
+
+
+undefined
+undefined
+undefined
+7 sites
+Windows-10-IoT-UP2-Board-BIOS-RHPROXY ... - Annabooks
+Since Windows 10 IoT Core and Windows 10 Enterprise LTSC 2019 (aka Windows 10 IoT Enterprise) are the same operating system, the s...
+
+Annabooks
+
+UP Board Firmware Settings to Enable SPI/I2C/GPIO/UART for ...
+The second step is to configure the GPIO. In the Advanced-> HAT, Configuration-> GPIO Configuration In Pin Order, you can set any ...
+
+Annabooks
+
+BIOS Does not have "Windows 10 IOT Core" option
+Nov 16, 2018 — BIOS Does not have "Windows 10 IOT Core" option — upcommunity. Home › UP Product Related Discussions › UP Squared › UP Squared Win...
+
+UP Bridge the Gap
+Show all
+is there any other options？
+If you cannot update the BIOS or the "Windows 10 IoT Core" option is missing, your options for accessing the 40-pin header on Windows 10 Home are limited because the hardware is not exposed to the operating system's standard driver stack. 
+Annabooks
+Annabooks
+ +1
+Here are the remaining alternatives:
+1. Manual Driver Installation (Aaeon/UP SDK)
+Even without the specific BIOS toggle, you can try to manually force the installation of the manufacturer's drivers.
+Download: The UP Board Windows 10 64-bit driver package.
+Manual Install: Open Device Manager, find any "Unknown Devices" (likely listed with IDs like AAEON_DEV_081C or similar), and manually point the "Update Driver" browse tool to the unzipped driver folder.
+Access: If successful, use the UP SDK which provides the aaeonEapi.dll library to interact with the pins through C# or C++. 
+2. External USB-to-GPIO Adapter
+If the onboard header remains inaccessible due to the old BIOS, the most reliable "workaround" for Windows 10 Home is an external bridge.
+FT232H Breakout: Devices like the Adafruit FT232H connect via USB and provide GPIO, SPI, and I2C pins that are natively supported on Windows via Python libraries (e.g., Adafruit_Blinka).
+Arduino/Microcontroller: Use an Arduino (connected via USB) as a dedicated I/O controller, communicating with your Windows app over a Serial/COM port. 
+YouTube
+YouTube
+ +3
+3. Switch to Linux (Dual Boot or Live USB)
+The GPIO pins on the CHT01 are significantly easier to access on Linux because you can use a custom kernel that doesn't rely on the BIOS-to-Windows RHPROXY bridge. 
+RobotExchange
+RobotExchange
+ +1
+You can boot Ubuntu from a USB stick and install the upboard-extras package to gain immediate control of the 40-pin header. 
+GitHub Pages documentation
+GitHub Pages documentation
+Summary of Limitations
+Method	Complexity	Reliability on Home Edition
+BIOS Update	Medium	High (Standard method)
+Manual Driver Force	High	Medium (Depends on ACPI tables)
+USB-to-GPIO Bridge	Low	High (Bypasses BIOS/Driver issues)
+Switch to Linux	Low	High (Bypasses Windows limitations)
+Important Note: Direct register access (bit-banging) is not recommended on Windows because the OS manages hardware addresses behind a protection layer; without the driver being active, your application will likely crash with an access violation if it tries to touch the GPIO memory addresses directly. 
+These technical forum posts discuss native C libraries for GPIO access and interacting with GPIO on Windows 10 for non-Raspberry Pi devices:
+Native C libraries to GPIO pins? - Community Forum
+Sep 15, 2016 — Comments. Dan O'Donovan Administrator, Moderator, Emutex Posts: 241 admin. September 2016. For a native C library, I suggest using...
+
+UP Bridge the Gap
+How to communicate with GPIO on windows (Win 10) for non ...
+May 15, 2019 — You cannot use BIOS interrupts when the CPU is in protected mode, which all modern operating systems use. Looking at the manual fo...
+
+Stack Overflow
+
+UpBoard Configuration - UpCluster - GitHub Pages
+Install the upboard-extras. sudo apt install upboard-extras. Add the user that needs to access the HAT funcionality. GPIO. sudo us...
+
+GitHub Pages documentation
+GPIO/I2C kernel support for UP2 board, taken from https://aur ...
+You only strictly need to install the core kernel and modules: $ cd .. $ sudo dpkg -i linux-image-unsigned-4.15.0-40-generic_4.15.
+
+Gist
+
+[Solved] Controling GPIO pins on upboard with Python/Ubuntu
+Jun 11, 2018 — The problem with these board is that the GPIO pins can't handle much current. For the UP board this is max. 24 mA (see: Pinout · u...
+
+RobotExchange
+
+Add Python programmable GPIO pins to any computer with ...
+Jun 5, 2024 — i've got a lot of development boards for a variety of purposes. and this is just a few of them because sometimes I don't want to y...
+
+YouTube·Nick Bild
+
+3:54
+Would you like the pin-out diagram for the CHT01 to help you identify which pins to use if you try the manual driver method?
+
