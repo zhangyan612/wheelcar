@@ -17,7 +17,7 @@ app = Flask(__name__)
 CAMERA_INDEX = None
 
 # ESP32 Configuration - Change this to your ESP32's IP address
-ESP32_IP = "192.168.1.100"  # TODO: Update with your ESP32 IP
+ESP32_IP = "192.168.1.206"  # Default ESP32 IP
 
 
 def get_local_ip():
