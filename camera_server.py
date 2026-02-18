@@ -72,9 +72,9 @@ def generate_frames():
     """Generate MJPEG frames from camera"""
     camera = cv2.VideoCapture(CAMERA_INDEX)
     
-    # Set camera resolution
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Set camera resolution (higher resolution)
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     
     if not camera.isOpened():
         print("Error: Cannot open camera")
@@ -118,14 +118,14 @@ def index():
             text-align: center;
         }
         h1 { color: #00d4ff; }
-        .container { max-width: 800px; margin: 0 auto; }
+        .container { max-width: 100%; margin: 0 auto; }
         .stream-container {
             background: #16213e;
             border-radius: 10px;
             padding: 10px;
             box-shadow: 0 4px 15px rgba(0, 212, 255, 0.2);
         }
-        img { width: 100%; max-width: 640px; border-radius: 5px; }
+        img { width: 100%; max-width: 1280px; border-radius: 5px; }
         .info { margin-top: 20px; color: #888; font-size: 14px; }
     </style>
 </head>
