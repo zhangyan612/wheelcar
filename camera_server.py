@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 MJPEG Camera Web Server for UP Board with Intel RealSense F200 Camera
-The F200 is an older model - use OpenCV with DirectShow backend
 Works with Python 3.7+
 Access from other computers: http://<UP_BOARD_IP>:5000
 """
@@ -15,7 +14,6 @@ app = Flask(__name__)
 
 # Camera configuration - will be auto-detected
 CAMERA_INDEX = None
-CAMERA_BACKEND = None
 
 
 def get_local_ip():
@@ -30,66 +28,59 @@ def get_local_ip():
         return "127.0.0.1"
 
 
-
-
-
-
-
 def find_camera():
     """
     Auto-detect working camera.
     F200 has multiple streams (RGB, depth, IR) on different indices.
-    Try to find the one with color output.
     """
-    global CAMERA_INDEX, CAMERA_BACKEND
+    global CAMERA_INDEX
     
-    # Try DirectShow first (Windows), then V4L2 (Linux), then default
-    backends = [
-        (cv2.CAP_DSHOW, "DirectShow"),
-        (cv2.CAP_V4L2, "V4L2"),
-        (cv2.CAP_ANY, "Default"),
-    ]
+    print("  Scanning for cameras...")
     
-    for backend, backend_name in backends:
-        for index in range(5):  # Try indices 0-4
-            cap = cv2.VideoCapture(index, backend)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    # Check if it's a color image (3 channels)
-                    if len(frame.shape) == 3 and frame.shape[2] == 3:
-                        # Check if image is not all green/monochrome (F200 depth/IR)
-                        avg_color = np.mean(frame, axis=(0, 1))
-                        # BGR: check if not dominated by green
-                        if not (avg_color[1] > avg_color[0] * 2 and avg_color[1] > avg_color[2] * 2):
-                            print(f"  Found color camera at index {index} using {backend_name}")
-                            CAMERA_INDEX = index
-                            CAMERA_BACKEND = backend
-                            cap.release()
-                            return True
-                cap.release()
+    for index in range(6):  # Try indices 0-5
+        cap = cv2.VideoCapture(index)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                h, w = frame.shape[:2]
+                channels = frame.shape[2] if len(frame.shape) == 3 else 1
+                
+                print(f"    Index {index}: {w}x{h}, {channels} channels")
+                
+                # Check if it's a color image (3 channels)
+                if channels == 3:
+                    # Check if image is not all green (depth/IR from F200)
+                    avg_color = np.mean(frame, axis=(0, 1))
+                    green_ratio = avg_color[1] / (avg_color[0] + avg_color[2] + 1)
+                    
+                    if green_ratio < 1.5:  # Not dominated by green
+                        print(f"    -> Selected (color camera)")
+                        CAMERA_INDEX = index
+                        cap.release()
+                        return True
+                    else:
+                        print(f"    -> Skipping (appears to be depth/IR stream)")
+            cap.release()
     
     # Fallback: just use index 0
-    print("  Could not auto-detect camera, using index 0")
+    print("  Could not find color camera, using index 0")
     CAMERA_INDEX = 0
-    CAMERA_BACKEND = cv2.CAP_DSHOW
     return True
 
 
 def generate_frames():
     """Generate MJPEG frames from camera"""
-    camera = cv2.VideoCapture(CAMERA_INDEX, CAMERA_BACKEND)
+    camera = cv2.VideoCapture(CAMERA_INDEX)
     
     # Set camera resolution
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    camera.set(cv2.CAP_PROP_FPS, 30)
     
     if not camera.isOpened():
         print("Error: Cannot open camera")
         return
     
-    print("  Camera stream started")
+    print("  Stream started")
     
     while True:
         success, frame = camera.read()
@@ -126,29 +117,16 @@ def index():
             color: #eee;
             text-align: center;
         }
-        h1 {
-            color: #00d4ff;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
+        h1 { color: #00d4ff; }
+        .container { max-width: 800px; margin: 0 auto; }
         .stream-container {
             background: #16213e;
             border-radius: 10px;
             padding: 10px;
             box-shadow: 0 4px 15px rgba(0, 212, 255, 0.2);
         }
-        img {
-            width: 100%;
-            max-width: 640px;
-            border-radius: 5px;
-        }
-        .info {
-            margin-top: 20px;
-            color: #888;
-            font-size: 14px;
-        }
+        img { width: 100%; max-width: 640px; border-radius: 5px; }
+        .info { margin-top: 20px; color: #888; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -157,9 +135,7 @@ def index():
         <div class="stream-container">
             <img src="/video_feed" alt="Camera Stream">
         </div>
-        <div class="info">
-            MJPEG Stream | Refresh page if stream stops
-        </div>
+        <div class="info">MJPEG Stream | Refresh if stream stops</div>
     </div>
 </body>
 </html>
@@ -176,7 +152,7 @@ def video_feed():
 @app.route('/snapshot')
 def snapshot():
     """Single snapshot endpoint"""
-    camera = cv2.VideoCapture(CAMERA_INDEX, CAMERA_BACKEND)
+    camera = cv2.VideoCapture(CAMERA_INDEX)
     success, frame = camera.read()
     camera.release()
     
@@ -195,7 +171,6 @@ if __name__ == '__main__':
     print("=" * 50)
     print("  UP Board Camera Web Server")
     print("=" * 50)
-    print("  Detecting camera...")
     find_camera()
     
     print(f"\n  Access from browser:")
