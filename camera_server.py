@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """
-MJPEG Camera Web Server for UP Board with Intel RealSense Camera
+MJPEG Camera Web Server for UP Board with Intel RealSense F200 Camera
+The F200 is an older model - use OpenCV with DirectShow backend
 Works with Python 3.7+
 Access from other computers: http://<UP_BOARD_IP>:5000
 """
 
 from flask import Flask, Response
 import socket
+import cv2
 import numpy as np
-
-# Try to use RealSense SDK first, fallback to OpenCV
-USE_REALSENSE = False
-try:
-    import pyrealsense2 as rs
-    USE_REALSENSE = True
-    print("Using Intel RealSense SDK")
-except ImportError:
-    import cv2
-    print("RealSense SDK not found, falling back to OpenCV")
 
 app = Flask(__name__)
 
-# Global RealSense objects
-pipeline = None
-config = None
+# Camera configuration - will be auto-detected
+CAMERA_INDEX = None
+CAMERA_BACKEND = None
 
 
 def get_local_ip():
@@ -38,74 +30,83 @@ def get_local_ip():
         return "127.0.0.1"
 
 
-def init_realsense():
-    """Initialize RealSense pipeline for RGB stream"""
-    global pipeline, config
-    pipeline = rs.pipeline()
-    config = rs.config()
+
+
+
+
+
+def find_camera():
+    """
+    Auto-detect working camera.
+    F200 has multiple streams (RGB, depth, IR) on different indices.
+    Try to find the one with color output.
+    """
+    global CAMERA_INDEX, CAMERA_BACKEND
     
-    # Configure RGB stream only
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    # Try DirectShow first (Windows), then V4L2 (Linux), then default
+    backends = [
+        (cv2.CAP_DSHOW, "DirectShow"),
+        (cv2.CAP_V4L2, "V4L2"),
+        (cv2.CAP_ANY, "Default"),
+    ]
     
-    # Start pipeline
-    profile = pipeline.start(config)
+    for backend, backend_name in backends:
+        for index in range(5):  # Try indices 0-4
+            cap = cv2.VideoCapture(index, backend)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    # Check if it's a color image (3 channels)
+                    if len(frame.shape) == 3 and frame.shape[2] == 3:
+                        # Check if image is not all green/monochrome (F200 depth/IR)
+                        avg_color = np.mean(frame, axis=(0, 1))
+                        # BGR: check if not dominated by green
+                        if not (avg_color[1] > avg_color[0] * 2 and avg_color[1] > avg_color[2] * 2):
+                            print(f"  Found color camera at index {index} using {backend_name}")
+                            CAMERA_INDEX = index
+                            CAMERA_BACKEND = backend
+                            cap.release()
+                            return True
+                cap.release()
+    
+    # Fallback: just use index 0
+    print("  Could not auto-detect camera, using index 0")
+    CAMERA_INDEX = 0
+    CAMERA_BACKEND = cv2.CAP_DSHOW
     return True
 
 
-def generate_frames_realsense():
-    """Generate MJPEG frames from RealSense camera"""
-    try:
-        while True:
-            # Wait for frames
-            frames = pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            
-            if not color_frame:
-                continue
-            
-            # Convert to numpy array (BGR format for JPEG encoding)
-            frame = np.asanyarray(color_frame.get_data())
-            
-            # Encode as JPEG
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if not ret:
-                continue
-            
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    finally:
-        if pipeline:
-            pipeline.stop()
-
-
-def generate_frames_opencv():
-    """Fallback: Generate MJPEG frames using OpenCV"""
-    import cv2
-    camera = cv2.VideoCapture(0)
+def generate_frames():
+    """Generate MJPEG frames from camera"""
+    camera = cv2.VideoCapture(CAMERA_INDEX, CAMERA_BACKEND)
+    
+    # Set camera resolution
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    camera.set(cv2.CAP_PROP_FPS, 30)
     
     if not camera.isOpened():
         print("Error: Cannot open camera")
         return
     
-    try:
-        while True:
-            success, frame = camera.read()
-            if not success:
-                print("Error: Cannot read frame")
-                break
-            
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if not ret:
-                continue
-            
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    finally:
-        camera.release()
+    print("  Camera stream started")
+    
+    while True:
+        success, frame = camera.read()
+        if not success:
+            print("Error: Cannot read frame")
+            break
+        
+        # Encode as JPEG
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ret:
+            continue
+        
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    
+    camera.release()
 
 
 @app.route('/')
@@ -168,12 +169,23 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     """MJPEG video stream endpoint"""
-    if USE_REALSENSE:
-        return Response(generate_frames_realsense(),
-                        mimetype='multipart/x-mixed-replace; boundary=frame')
-    else:
-        return Response(generate_frames_opencv(),
-                        mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/snapshot')
+def snapshot():
+    """Single snapshot endpoint"""
+    camera = cv2.VideoCapture(CAMERA_INDEX, CAMERA_BACKEND)
+    success, frame = camera.read()
+    camera.release()
+    
+    if success:
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if ret:
+            return Response(buffer.tobytes(), mimetype='image/jpeg')
+    
+    return "Camera error", 500
 
 
 if __name__ == '__main__':
@@ -183,12 +195,8 @@ if __name__ == '__main__':
     print("=" * 50)
     print("  UP Board Camera Web Server")
     print("=" * 50)
-    
-    if USE_REALSENSE:
-        print("  Camera: Intel RealSense")
-        init_realsense()
-    else:
-        print("  Camera: OpenCV fallback")
+    print("  Detecting camera...")
+    find_camera()
     
     print(f"\n  Access from browser:")
     print(f"  http://{local_ip}:{port}")
