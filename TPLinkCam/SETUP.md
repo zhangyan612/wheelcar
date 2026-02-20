@@ -214,7 +214,8 @@ cam.serve_web(port=5001)
                          │ Display │  │ MJPEG   │  │ Save   │
                          └─────────┘  └─────────┘  └────────┘
 ```
-
-
-
-Next step, use ai to detect object or person in clip 
+### AI-Powered Motion Detection (V2)
+```bash
+python motion_detect_v2.py
+```
+This version adds **AI Filtering** (using Torch + SSD-Mobilenet) to verify motion events. It specifically looks for **People, Cats, and Dogs**, automatically dropping clips caused by wind, trees, or shadows. It also uses higher default thresholds to reduce "frequent" triggers.
