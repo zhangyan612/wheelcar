@@ -2,7 +2,7 @@
  * ESP32-S3-N8R2 Wheelcar Controller
  * Features:
  * - 4 Relay control (Forward, Backward, Left, Right)
- * - Servo control (PWM)
+ * - Servo control (PWM) - Simplified for testing
  * - Web interface (no camera)
  */
 
@@ -18,23 +18,32 @@ const char* password = "yon4-ewer-holly";
 
 // ===================
 // Relay GPIO Pins (ESP32-S3 safe pins)
+// All on left side: GPIO 15-18
 // ===================
-#define RELAY_FORWARD  4   // 前进
-#define RELAY_BACKWARD 5   // 后退
-#define RELAY_LEFT     6   // 左转
-#define RELAY_RIGHT    7   // 右转
+#define RELAY_FORWARD  15  // Forward
+#define RELAY_BACKWARD 16  // Backward
+#define RELAY_LEFT     17  // Left turn
+#define RELAY_RIGHT    18  // Right turn
 
 // ===================
 // Servo Configuration
 // ===================
 #define SERVO_PIN 8
 
+// MG996R servo pulse width range (in microseconds)
+#define SERVO_MIN_PULSE 500   // Try wider range
+#define SERVO_MAX_PULSE 2500
+
 // ===================
 // Global Objects
 // ===================
 WebServer server(80);
 Servo myServo;
-int servoAngle = 90;
+
+// Servo auto-detach settings
+bool servoAttached = false;
+unsigned long lastServoTime = 0;
+const unsigned long SERVO_DETACH_DELAY = 1500;  // Detach after 1.5s inactivity
 
 // ===================
 // HTML Web Interface
@@ -44,14 +53,10 @@ const char index_html[] PROGMEM = R"rawliteral(
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wheelcar Controller</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -59,10 +64,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             color: #fff;
             padding: 10px;
         }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
+        .container { max-width: 600px; margin: 0 auto; }
         h1 {
             text-align: center;
             padding: 15px;
@@ -78,11 +80,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             gap: 10px;
             margin-top: 30px;
         }
-        .control-row {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-        }
+        .control-row { display: flex; justify-content: center; gap: 10px; }
         .btn {
             width: 90px;
             height: 90px;
@@ -92,13 +90,8 @@ const char index_html[] PROGMEM = R"rawliteral(
             border-radius: 15px;
             cursor: pointer;
             transition: all 0.2s;
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: manipulation;
         }
-        .btn:active {
-            transform: scale(0.95);
-        }
+        .btn:active { transform: scale(0.95); }
         .btn-forward { background: linear-gradient(145deg, #00b894, #00a085); color: white; }
         .btn-backward { background: linear-gradient(145deg, #e17055, #d63031); color: white; }
         .btn-left { background: linear-gradient(145deg, #0984e3, #0769b8); color: white; }
@@ -112,22 +105,14 @@ const char index_html[] PROGMEM = R"rawliteral(
             padding: 20px;
             border-radius: 10px;
         }
-        .servo-section h3 {
-            margin-bottom: 15px;
-        }
-        .slider-container {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            justify-content: center;
-        }
+        .servo-section h3 { margin-bottom: 15px; }
+        .slider-container { display: flex; align-items: center; gap: 15px; justify-content: center; }
         input[type="range"] {
             width: 250px;
             height: 10px;
             -webkit-appearance: none;
             background: #0f3460;
             border-radius: 5px;
-            outline: none;
         }
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
@@ -137,19 +122,13 @@ const char index_html[] PROGMEM = R"rawliteral(
             border-radius: 50%;
             cursor: pointer;
         }
-        .angle-display {
-            font-size: 1.4em;
-            font-weight: bold;
-            min-width: 70px;
-            text-align: center;
-        }
+        .angle-display { font-size: 1.4em; font-weight: bold; margin-top: 10px; }
         .status {
             text-align: center;
             margin-top: 20px;
             padding: 15px;
             background: rgba(0,0,0,0.3);
             border-radius: 8px;
-            font-size: 1.1em;
         }
     </style>
 </head>
@@ -160,17 +139,17 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="control-section">
             <div class="control-row">
                 <button class="btn btn-empty"></button>
-                <button class="btn btn-forward" ontouchstart="control('forward')" ontouchend="control('stop')" onmousedown="control('forward')" onmouseup="control('stop')">前进</button>
+                <button class="btn btn-forward" ontouchstart="control('forward')" ontouchend="control('stop')" onmousedown="control('forward')" onmouseup="control('stop')">Forward</button>
                 <button class="btn btn-empty"></button>
             </div>
             <div class="control-row">
-                <button class="btn btn-left" ontouchstart="control('left')" ontouchend="control('stop')" onmousedown="control('left')" onmouseup="control('stop')">左转</button>
-                <button class="btn btn-stop" onclick="control('stop')">停止</button>
-                <button class="btn btn-right" ontouchstart="control('right')" ontouchend="control('stop')" onmousedown="control('right')" onmouseup="control('stop')">右转</button>
+                <button class="btn btn-left" ontouchstart="control('left')" ontouchend="control('stop')" onmousedown="control('left')" onmouseup="control('stop')">Left</button>
+                <button class="btn btn-stop" onclick="control('stop')">Stop</button>
+                <button class="btn btn-right" ontouchstart="control('right')" ontouchend="control('stop')" onmousedown="control('right')" onmouseup="control('stop')">Right</button>
             </div>
             <div class="control-row">
                 <button class="btn btn-empty"></button>
-                <button class="btn btn-backward" ontouchstart="control('backward')" ontouchend="control('stop')" onmousedown="control('backward')" onmouseup="control('stop')">后退</button>
+                <button class="btn btn-backward" ontouchstart="control('backward')" ontouchend="control('stop')" onmousedown="control('backward')" onmouseup="control('stop')">Back</button>
                 <button class="btn btn-empty"></button>
             </div>
         </div>
@@ -193,19 +172,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     <script>
         function control(action) {
             fetch('/control?action=' + action)
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('status').innerText = action;
-                })
-                .catch(err => {
-                    console.log('Error:', err);
-                });
+                .then(r => r.text())
+                .then(d => document.getElementById('status').innerText = action);
         }
         
         function setServo(angle) {
             document.getElementById('servoAngle').innerText = angle;
-            fetch('/servo?angle=' + angle)
-                .catch(err => console.log('Error:', err));
+            fetch('/servo?angle=' + angle);
         }
     </script>
 </body>
@@ -223,51 +196,52 @@ void allRelaysOff() {
 }
 
 void controlRelay(String action) {
-    allRelaysOff();  // Safety: turn off all first
+    allRelaysOff();
     
-    if (action == "forward") {
-        digitalWrite(RELAY_FORWARD, LOW);
-    } else if (action == "backward") {
-        digitalWrite(RELAY_BACKWARD, LOW);
-    } else if (action == "left") {
-        digitalWrite(RELAY_LEFT, LOW);
-    } else if (action == "right") {
-        digitalWrite(RELAY_RIGHT, LOW);
-    }
-    // "stop" is handled by allRelaysOff()
+    if (action == "forward") digitalWrite(RELAY_FORWARD, LOW);
+    else if (action == "backward") digitalWrite(RELAY_BACKWARD, LOW);
+    else if (action == "left") digitalWrite(RELAY_LEFT, LOW);
+    else if (action == "right") digitalWrite(RELAY_RIGHT, LOW);
 }
 
 // ===================
-// Handle Root Page
+// HTTP Handlers
 // ===================
 void handleRoot() {
     server.send(200, "text/html", index_html);
 }
 
-// ===================
-// Handle Control Request
-// ===================
 void handleControl() {
     if (server.hasArg("action")) {
         String action = server.arg("action");
         controlRelay(action);
         Serial.println("Action: " + action);
-        server.send(200, "text/plain", "OK: " + action);
+        server.send(200, "text/plain", "OK");
     } else {
         server.send(400, "text/plain", "Missing action");
     }
 }
 
-// ===================
-// Handle Servo Request
-// ===================
 void handleServo() {
     if (server.hasArg("angle")) {
         int angle = server.arg("angle").toInt();
         angle = constrain(angle, 0, 180);
-        myServo.write(angle);
-        servoAngle = angle;
-        Serial.printf("Servo angle: %d\n", angle);
+        
+        // Re-attach servo if detached
+        if (!servoAttached) {
+            ESP32PWM::allocateTimer(0);
+            myServo.setPeriodHertz(50);
+            myServo.attach(SERVO_PIN, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+            servoAttached = true;
+            Serial.println("Servo re-attached");
+        }
+        
+        // Write pulse directly for better control
+        int pulse = map(angle, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+        myServo.writeMicroseconds(pulse);
+        lastServoTime = millis();  // Update activity time
+        
+        Serial.printf("Servo: %d° (pulse: %d us)\n", angle, pulse);
         server.send(200, "text/plain", "OK");
     } else {
         server.send(400, "text/plain", "Missing angle");
@@ -279,9 +253,8 @@ void handleServo() {
 // ===================
 void setup() {
     Serial.begin(115200);
-    delay(1000);
-    Serial.println();
-    Serial.println("Starting Wheelcar Controller...");
+    delay(500);
+    Serial.println("\n\nStarting Wheelcar Controller...");
     
     // Initialize relay pins
     pinMode(RELAY_FORWARD, OUTPUT);
@@ -291,9 +264,17 @@ void setup() {
     allRelaysOff();
     Serial.println("Relays initialized");
     
-    // Initialize servo
-    myServo.attach(SERVO_PIN);
-    myServo.write(servoAngle);
+    // Initialize servo - SIMPLE WAY
+    ESP32PWM::allocateTimer(0);
+    myServo.setPeriodHertz(50);
+    myServo.attach(SERVO_PIN, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+    servoAttached = true;
+    lastServoTime = millis();
+    
+    // Move to center slowly
+    Serial.println("Moving servo to center (90°)...");
+    myServo.writeMicroseconds(1500);  // Center position
+    delay(500);
     Serial.println("Servo initialized");
     
     // Connect to WiFi
@@ -307,15 +288,12 @@ void setup() {
     Serial.print("Connected! IP: ");
     Serial.println(WiFi.localIP());
     
-    // Setup web server routes
+    // Setup web server
     server.on("/", handleRoot);
     server.on("/control", handleControl);
     server.on("/servo", handleServo);
-    
-    // Start server
     server.begin();
     Serial.println("HTTP server started");
-    Serial.printf("Open http://%s in your browser\n", WiFi.localIP().toString().c_str());
 }
 
 // ===================
@@ -323,5 +301,13 @@ void setup() {
 // ===================
 void loop() {
     server.handleClient();
+    
+    // Auto-detach servo after inactivity
+    if (servoAttached && (millis() - lastServoTime > SERVO_DETACH_DELAY)) {
+        myServo.detach();
+        servoAttached = false;
+        Serial.println("Servo detached (inactivity)");
+    }
+    
     delay(2);
 }
