@@ -103,7 +103,7 @@ while True:
 ## Installation
 
 ```bash
-# Using the ultrarag conda environment
+# Using the ultrarag conda environment, make sure to switch to the env before isntalling anything
 pip install opencv-python requests numpy flask
 ```
 
@@ -214,3 +214,7 @@ cam.serve_web(port=5001)
                          │ Display │  │ MJPEG   │  │ Save   │
                          └─────────┘  └─────────┘  └────────┘
 ```
+
+
+
+Next step, use ai to detect object or person in clip 
