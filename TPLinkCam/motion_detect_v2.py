@@ -50,7 +50,8 @@ DEFAULT_PASSWORD = "zymeng90612"
 
 # Motion detection settings (Increased for V2)
 DEFAULT_THRESHOLD = 35       # Higher pixel difference threshold
-DEFAULT_MIN_AREA = 5000      # Larger area required for motion
+DEFAULT_MIN_AREA = 2000      # Lowered back to be more sensitive to initial triggers
+DEFAULT_FORCE_SAVE_AREA = 5000 # If area is larger than this, save regardless of AI
 DEFAULT_COOLDOWN = 5         # Seconds of quiet before finalising a clip
 DEFAULT_PRE_RECORD = 5       # Seconds of footage to keep BEFORE motion
 DEFAULT_POST_RECORD = 3      # Seconds of footage to keep AFTER motion
@@ -255,6 +256,7 @@ class CameraMonitor(threading.Thread):
     def __init__(self, ip, output_dir, port=DEFAULT_PORT,
                  username=DEFAULT_USERNAME, password=DEFAULT_PASSWORD,
                  threshold=DEFAULT_THRESHOLD, min_area=DEFAULT_MIN_AREA,
+                 force_save_area=DEFAULT_FORCE_SAVE_AREA,
                  cooldown=DEFAULT_COOLDOWN, decode_interval=DEFAULT_DECODE_INTERVAL,
                  pre_record=DEFAULT_PRE_RECORD, post_record=DEFAULT_POST_RECORD,
                  use_ai=True):
@@ -266,6 +268,7 @@ class CameraMonitor(threading.Thread):
         self.output_dir = output_dir
         self.threshold = threshold
         self.min_area = min_area
+        self.force_save_area = force_save_area
         self.cooldown = cooldown
         self.decode_interval = decode_interval
         self.pre_record = pre_record
@@ -334,6 +337,7 @@ class CameraMonitor(threading.Thread):
 
         recording = False
         ai_confirmed = False
+        max_area_seen = 0
         motion_clip_frames = []
         last_motion_at = 0.0
         clip_start_time = None
@@ -346,7 +350,7 @@ class CameraMonitor(threading.Thread):
                     h264_frame = self.frame_queue.get(timeout=1.0)
                 except queue.Empty:
                     if recording and (time.time() - last_motion_at >= self.post_record):
-                        self._finish_recording(motion_clip_frames, ai_confirmed, clip_start_time)
+                        self._finish_recording(motion_clip_frames, ai_confirmed, max_area_seen, clip_start_time)
                         recording = False
                         motion_clip_frames = []
                     continue
@@ -378,10 +382,12 @@ class CameraMonitor(threading.Thread):
                 if motion:
                     last_motion_at = now
                     self.last_motion_time = now
+                    max_area_seen = max(max_area_seen, area)
                     
                     if not recording:
                         recording = True
                         ai_confirmed = False
+                        max_area_seen = area
                         clip_start_time = now
                         motion_clip_frames = [f.copy() for (_, f) in ring_buffer]
                         print(f"  [{self.ip}] >>> Suspected Motion (Area={area:.0f})")
@@ -399,7 +405,7 @@ class CameraMonitor(threading.Thread):
                 elif recording:
                     motion_clip_frames.append(frame.copy())
                     if now - last_motion_at >= self.post_record:
-                        self._finish_recording(motion_clip_frames, ai_confirmed, clip_start_time)
+                        self._finish_recording(motion_clip_frames, ai_confirmed, max_area_seen, clip_start_time)
                         recording = False
                         motion_clip_frames = []
                         h264_buf = h264_header
@@ -409,12 +415,14 @@ class CameraMonitor(threading.Thread):
                 print(f"  [{self.ip}] Processor error: {e}")
                 time.sleep(1)
 
-    def _finish_recording(self, frames, ai_confirmed, start_time):
+    def _finish_recording(self, frames, ai_confirmed, max_area_seen, start_time):
         if not frames: return
         
-        # If AI is used but never confirmed a person/animal, we drop the clip to save space
-        if self.use_ai and not ai_confirmed:
-            # print(f"  [{self.ip}] Clip dropped (No Person/Animal detected).")
+        # Save if AI found something OR if the motion area was significantly large
+        should_save = ai_confirmed or (max_area_seen >= self.force_save_area)
+        
+        if not should_save:
+            # print(f"  [{self.ip}] Clip dropped (Area={max_area_seen:.0f}, AI=False).")
             return
 
         duration = time.time() - start_time
@@ -457,6 +465,7 @@ def main():
     p.add_argument("--cameras", nargs="+", default=DEFAULT_CAMERAS)
     p.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
     p.add_argument("--min-area", type=int, default=DEFAULT_MIN_AREA)
+    p.add_argument("--force-save-area", type=int, default=DEFAULT_FORCE_SAVE_AREA)
     p.add_argument("--no-ai", action="store_true", help="Disable AI filtering")
     p.add_argument("--output", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "motion_clips_v2"))
     args = p.parse_args()
@@ -470,7 +479,14 @@ def main():
 
     monitors = []
     for ip in args.cameras:
-        m = CameraMonitor(ip=ip, output_dir=args.output, threshold=args.threshold, min_area=args.min_area, use_ai=not args.no_ai)
+        m = CameraMonitor(
+            ip=ip, 
+            output_dir=args.output, 
+            threshold=args.threshold, 
+            min_area=args.min_area,
+            force_save_area=args.force_save_area,
+            use_ai=not args.no_ai
+        )
         monitors.append(m)
         m.start()
         time.sleep(2)
