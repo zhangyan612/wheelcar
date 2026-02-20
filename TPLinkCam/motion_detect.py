@@ -36,6 +36,7 @@ import datetime
 import urllib3
 import requests.adapters
 from collections import deque
+import queue
 from urllib3.util.ssl_ import create_urllib3_context
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -50,10 +51,10 @@ DEFAULT_PASSWORD = "zymeng90612"
 
 # Motion detection settings
 DEFAULT_THRESHOLD = 25       # Pixel difference threshold (0-255)
-DEFAULT_MIN_AREA = 2000      # Minimum contour area to count as motion (pixels)
+DEFAULT_MIN_AREA = 1500      # Lowered to be more sensitive to end-of-event motion
 DEFAULT_COOLDOWN = 5         # Seconds of quiet before finalising a clip
 DEFAULT_PRE_RECORD = 5       # Seconds of footage to keep BEFORE motion
-DEFAULT_POST_RECORD = 8      # Seconds of footage to keep AFTER motion stops
+DEFAULT_POST_RECORD = 3      # Reduced to 3s to avoid large files and potential overhead
 DEFAULT_DECODE_INTERVAL = 10 # Decode every N H.264 frames (~3 decoded fps)
 
 
@@ -270,23 +271,29 @@ class CameraMonitor(threading.Thread):
         self._decoded_fps = max(1.0, 30.0 / decode_interval)
 
     def run(self):
-        """Main loop: connect, stream, detect, save."""
+        """Main loop: starts receiver and processor threads."""
         self.running = True
+        self.frame_queue = queue.Queue(maxsize=2000)
 
+        # Start the processing thread
+        processor = threading.Thread(target=self._processor_loop, daemon=True)
+        processor.start()
+
+        # Receiver loop (runs in this thread)
         while self.running:
             try:
-                self._stream_loop()
+                self._receiver_loop()
             except Exception as e:
                 self.status = f"error: {e}"
-                print(f"  [{self.ip}] Error: {e}")
+                print(f"  [{self.ip}] Receiver Error: {e}")
 
             if self.running:
                 self.status = "reconnecting"
                 print(f"  [{self.ip}] Reconnecting in 10s...")
                 time.sleep(10)
 
-    def _stream_loop(self):
-        """Single connection attempt: stream, detect, and save."""
+    def _receiver_loop(self):
+        """Dedicated loop for pulling data from the network as fast as possible."""
         self.status = "connecting"
         print(f"  [{self.ip}] Connecting...")
 
@@ -298,17 +305,33 @@ class CameraMonitor(threading.Thread):
             return
 
         self.status = "streaming"
-        print(f"  [{self.ip}] Connected! Monitoring for motion...")
-        print(
-            f"  [{self.ip}] Pre-record: {self.pre_record}s | "
-            f"Post-record: {self.post_record}s | "
-            f"~{self._decoded_fps:.1f} decoded fps"
-        )
+        print(f"  [{self.ip}] Connected! Receiver started.")
 
+        for h264_frame in parse_h264_frames(response):
+            if not self.running:
+                break
+            
+            try:
+                # Use a small timeout so we can check self.running regularly
+                self.frame_queue.put(h264_frame, timeout=0.1)
+                self.frames_received += 1
+            except queue.Full:
+                # If queue is full, we are lagging significantly. 
+                # Drop frames to keep the network connection alive?
+                # Actually, dropping H.264 frames mid-stream causes corruption.
+                # But blocking the network causes disconnect.
+                # We'll wait a bit and try again, but if it stays full, we're in trouble.
+                pass
+
+    def _processor_loop(self):
+        """Dedicated loop for decoding, detecting motion, and saving clips."""
         detector = MotionDetector(
             threshold=self.threshold, min_area=self.min_area
         )
+        
+        # --- Decoder buffer management ---
         h264_buf = b""
+        h264_header = b""  # Store SPS/PPS so resets don't break decoding
         h264_count = 0
 
         # --- Ring buffer: always keeps the last `pre_record` seconds ---
@@ -321,67 +344,86 @@ class CameraMonitor(threading.Thread):
         last_motion_at = 0.0        # timestamp of most recent motion frame
         clip_start_time = None      # when recording started (for logging)
 
-        for h264_frame in parse_h264_frames(response):
-            if not self.running:
-                break
+        print(f"  [{self.ip}] Processor started. Pre-record: {self.pre_record}s | Post-record: {self.post_record}s")
 
-            h264_buf += h264_frame
-            h264_count += 1
-            self.frames_received = h264_count
+        while self.running:
+            try:
+                # Get frame from queue
+                try:
+                    h264_frame = self.frame_queue.get(timeout=1.0)
+                except queue.Empty:
+                    # If we are recording and no frames arrive for a while, finalize the clip
+                    if recording and (time.time() - last_motion_at >= self.post_record):
+                        print(f"  [{self.ip}] Finalizing clip due to inactivity/disconnect.")
+                        total_seconds = time.time() - clip_start_time
+                        self._save_motion_event(motion_clip_frames, total_seconds)
+                        recording = False
+                        motion_clip_frames = []
+                        h264_buf = h264_header
+                        h264_count = 0
+                    continue
 
-            # Decode periodically
-            if h264_count % self.decode_interval != 0:
-                continue
+                # Capture SPS/PPS header
+                if not h264_header and len(h264_frame) > 4:
+                    nal_type = h264_frame[4] & 0x1F
+                    if nal_type in (7, 8):
+                        h264_header += h264_frame
 
-            frame = decode_latest_frame(h264_buf, self.tmp_path)
-            if frame is None:
-                continue
+                h264_buf += h264_frame
+                h264_count += 1
 
-            self.frames_decoded += 1
-            now = time.time()
+                # Reset buffer periodically
+                if h264_count > 300 and not recording:
+                    h264_buf = h264_header + h264_frame
+                    h264_count = 1
 
-            # Always push into ring buffer (with timestamp)
-            ring_buffer.append((now, frame.copy()))
+                # Decode periodically
+                if h264_count % self.decode_interval != 0:
+                    continue
 
-            # Run motion detection
-            motion, area, _ = detector.detect(frame)
+                frame = decode_latest_frame(h264_buf, self.tmp_path)
+                if frame is None:
+                    continue
 
-            if motion:
-                self.last_motion_time = now
-                last_motion_at = now
+                self.frames_decoded += 1
+                now = time.time()
 
-                if not recording:
-                    # ---- START recording ----
-                    recording = True
-                    clip_start_time = now
-                    # Seed clip with the pre-buffer contents
-                    motion_clip_frames = [f.copy() for (_, f) in ring_buffer]
-                    print(
-                        f"  [{self.ip}] MOTION DETECTED! "
-                        f"Area={area} at {datetime.datetime.now():%H:%M:%S}  "
-                        f"(pre-buffered {len(motion_clip_frames)} frames)"
-                    )
-                else:
-                    # Still in motion — keep appending
+                # Always push into ring buffer
+                ring_buffer.append((now, frame.copy()))
+
+                # Run motion detection
+                motion, area, _ = detector.detect(frame)
+
+                if motion:
+                    self.last_motion_time = now
+                    last_motion_at = now
+
+                    if not recording:
+                        recording = True
+                        clip_start_time = now
+                        motion_clip_frames = [f.copy() for (_, f) in ring_buffer]
+                        print(
+                            f"  [{self.ip}] >>> STARTING CLIP: Motion detected (Area={area:.0f}) "
+                            f"at {datetime.datetime.now():%H:%M:%S}"
+                        )
+                    else:
+                        motion_clip_frames.append(frame.copy())
+
+                elif recording:
                     motion_clip_frames.append(frame.copy())
-
-            elif recording:
-                # No motion this frame, but we're still recording
-                motion_clip_frames.append(frame.copy())
-
-                # Have we exceeded the post-record window?
-                silence_duration = now - last_motion_at
-                if silence_duration >= self.post_record:
-                    # ---- STOP recording & save ----
-                    total_seconds = now - clip_start_time
-                    self._save_motion_event(motion_clip_frames, total_seconds)
-                    recording = False
-                    motion_clip_frames = []
-
-            # Reset H.264 buffer periodically to keep memory bounded
-            if h264_count > 300:
-                h264_buf = b""
-                h264_count = 0
+                    silence_duration = now - last_motion_at
+                    if silence_duration >= self.post_record:
+                        total_seconds = now - clip_start_time
+                        self._save_motion_event(motion_clip_frames, total_seconds)
+                        recording = False
+                        motion_clip_frames = []
+                        h264_buf = h264_header
+                        h264_count = 0
+                
+                self.frame_queue.task_done()
+            except Exception as e:
+                print(f"  [{self.ip}] Processor loop error: {e}")
+                time.sleep(1)
 
     def _save_motion_event(self, frames, clip_duration=0):
         """
