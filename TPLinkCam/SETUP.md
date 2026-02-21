@@ -13,14 +13,27 @@ We reverse-engineered the authentication and stream protocol and built a Python 
 - Decodes H.264 frames using OpenCV's FFMPEG backend
 - Displays live video or serves it as a browser-viewable MJPEG web feed
 
+## New: Tapo C113 Support (Native RTSP)
+
+The **Tapo C113** (and other Tapo models like C200, C210) supports **native RTSP**. This is much more efficient and has < 1 second latency.
+
+- **Status**: Tested and Working
+- **IP**: `192.168.1.210`
+- **Port**: `554` (Standard RTSP)
+- **URL**: `rtsp://<camera_user>:<camera_pass>@192.168.1.210:554/stream1`
+- **Setup**: You MUST create a "Camera Account" in the Tapo App (Settings -> Advanced Settings -> Camera Account). This is separate from your TP-Link ID.
+
 ---
 
 ## What Was Done
 
 ### 1. Network Discovery
-- Camera IP: `192.168.1.209` (DHCP assigned)
-- Port scan confirmed **port 19443** is open (HTTPS)
-- Other ports (80, 443, 554/RTSP, 8080) are **closed**
+- **Camera 1 (Kasa EC60)**: `192.168.1.209`
+  - Port **19443** (HTTPS) is open.
+  - No RTSP support.
+- **Camera 2 (Tapo C113)**: `192.168.1.210`
+  - Port **554** (RTSP) is open.
+  - Native RTSP support enabled via Camera Account.
 
 ### 2. Authentication
 The camera uses **HTTP Basic Auth** over HTTPS:
@@ -92,7 +105,7 @@ while True:
 **Latency**: typically < 1 second.
 
 ### Good RTSP cameras to consider:
-- **Tapo C200/C210** (TP-Link's newer line, supports RTSP natively!)
+- **Tapo C113 / C200 / C210** (TP-Link's newer line, supports RTSP natively! Tested at `192.168.1.210`)
 - **Reolink E1 / RLC-510A** (reliable RTSP, good quality)
 - **Wyze Cam v3** (with RTSP firmware)
 - **Amcrest IP cameras** (excellent RTSP support)
@@ -103,8 +116,8 @@ while True:
 ## Installation
 
 ```bash
-# Using the ultrarag conda environment, make sure to switch to the env before isntalling anything
-pip install opencv-python requests numpy flask
+# Using the ultrarag conda environment, make sure to switch to the env before installing anything
+pip install opencv-python requests numpy flask ultralytics
 ```
 
 FFmpeg should also be installed for H.264 decoding:
@@ -147,6 +160,11 @@ python tplink_camera.py --web --web-port 5001
 # Then open http://<your_pc_ip>:5001 in a browser
 ```
 
+### Live Display (Tapo Camera with YOLOv8)
+```bash
+python test_tapo.py
+```
+
 ### Reduce Latency (More CPU)
 ```bash
 python tplink_camera.py --decode-interval 5
@@ -160,8 +178,9 @@ python tplink_camera.py --decode-interval 5
 TPLinkCam/
 ├── SETUP.md                 # This document
 ├── tplink_camera.py         # Main reusable camera client
-├── test_connection.py       # Connection test script
-├── test_connection2.py      # Detailed connection logger
+├── test_connection.py       # Connection test script (Kasa)
+├── test_connection2.py      # Detailed connection logger (Kasa)
+├── test_tapo.py             # RTSP connection test (Tapo)
 ├── connection_log.txt       # Sample connection log
 ├── readme.md                # Original research notes
 └── camera_stream.h264       # Sample saved H.264 recording (gitignored)
