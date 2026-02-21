@@ -43,7 +43,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ========================
 # Default Configuration
 # ========================
-DEFAULT_CAMERAS = ["192.168.1.201"]  #"192.168.1.209", 
+DEFAULT_CAMERAS = ["192.168.1.209"]  #"192.168.1.201", 
 DEFAULT_PORT = 19443
 DEFAULT_USERNAME = "zhangyan612@gmail.com"
 DEFAULT_PASSWORD = "zymeng90612"
