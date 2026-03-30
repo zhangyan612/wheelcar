@@ -22,8 +22,8 @@ const char* password = "yon4-ewer-holly";
 // ===================
 // GPIO Configuration
 // ===================
-#define SERVO1_PIN 1
-#define SERVO2_PIN 3
+#define SERVO1_PIN 3
+#define SERVO2_PIN 4
 
 // ===================
 // Global Objects
@@ -37,7 +37,6 @@ int angle2 = 90;
 
 // Trigger State Machine Variables
 bool triggerActive = false;
-int triggerStep = 0;
 unsigned long triggerStartTime = 0;
 
 // Torque Release Variables
@@ -46,8 +45,8 @@ bool servo2IsAttached = true;
 const unsigned long RELEASE_DELAY = 3000; // 3 seconds
 
 // Timing for Trigger (ms)
-int triggerMoveTime = 800;   // Variable time to reach 180 degrees
-const int TRIGGER_RETURN_TIME = 500; // Time to return to 100 degrees
+int triggerMoveTime = 800;   // Variable time to reach trigger position
+int triggerPosition = 130;   // Single trigger position
 
 // ===================
 // HTML Web Interface
@@ -167,8 +166,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         <h1>Advanced Servo Panel</h1>
         
         <div class="control-group">
-            <label>Servo 1: Trigger & Position</label>
-            <input type="range" min="0" max="180" value="100" class="slider" id="servo1" oninput="updateServo(1, this.value)">
+            <label>Servo 1: Trigger & Position (Both Servos Move)</label>
+            <input type="range" min="60" max="139" value="100" class="slider" id="servo1" oninput="updateServo(1, this.value)">
             <div class="value-display"><span id="val1">100</span>&deg;</div>
             
             <button class="trigger-btn" id="btn1" onclick="triggerServo1()">Fire Trigger</button>
@@ -177,23 +176,25 @@ const char index_html[] PROGMEM = R"rawliteral(
                 <span>Move Duration (ms):</span>
                 <input type="number" id="triggerTime" class="time-input" value="800" onchange="updateTriggerTime(this.value)">
             </div>
-            <div class="status-small">Sequence: Start &rarr; 180&deg; &rarr; 100&deg;</div>
+            <div class="time-input-container">
+                <span>Trigger Position (&deg;):</span>
+                <input type="number" id="triggerPos" class="time-input" value="130" min="60" max="130" onchange="updateTriggerPosition(this.value)">
+            </div>
+            <div class="status-small">Moves both servos to trigger position</div>
         </div>
 
-        <div class="control-group">
-            <label>Servo 2: Positioning (Auto-Release)</label>
-            <input type="range" min="0" max="180" value="90" class="slider" id="servo2" oninput="updateServo(2, this.value)">
-            <div class="value-display"><span id="val2">90</span>&deg;</div>
-            <div class="status-small">Releases torque after 3s</div>
-        </div>
-
-        <div class="status" id="status">System Online</div>
+        <div class="status" id="status">System Online - Servo 2 Auto-Release Active</div>
     </div>
 
     <script>
         function updateTriggerTime(ms) {
             fetch(`/setTriggerTime?ms=${ms}`)
                 .then(r => console.log("Time updated to " + ms));
+        }
+
+        function updateTriggerPosition(pos) {
+            fetch(`/setTriggerPosition?pos=${pos}`)
+                .then(r => console.log("Trigger position updated to " + pos));
         }
 
         function triggerServo1() {
@@ -228,7 +229,7 @@ void handleRoot() {
 
 void handleTrigger() {
     triggerActive = true;
-    triggerStep = 0;
+    triggerStartTime = millis();
     server.send(200, "text/plain", "Trigger Started");
     Serial.println("Trigger requested via web.");
 }
@@ -243,6 +244,16 @@ void handleSetTriggerTime() {
     }
 }
 
+void handleSetTriggerPosition() {
+    if (server.hasArg("pos")) {
+        triggerPosition = constrain(server.arg("pos").toInt(), 0, 180);
+        server.send(200, "text/plain", "OK");
+        Serial.printf("Trigger position updated to: %d degrees\n", triggerPosition);
+    } else {
+        server.send(400, "text/plain", "Missing POS");
+    }
+}
+
 void handleServo() {
     if (server.hasArg("id") && server.hasArg("angle")) {
         int id = server.arg("id").toInt();
@@ -254,19 +265,21 @@ void handleServo() {
                 server.send(409, "text/plain", "Trigger busy");
                 return;
             }
+            // Move both servos together when Servo 1 is adjusted
             servo1.write(angle);
+            servo2.write(angle);
             angle1 = angle;
-            Serial.printf("Servo 1 manual -> %d\n", angle);
-        } else if (id == 2) {
+            angle2 = angle;
+            
+            // Reset servo2 release timer since it moved
             if (!servo2IsAttached) {
                 servo2.attach(SERVO2_PIN, 500, 2400);
                 servo2IsAttached = true;
                 Serial.println("Servo 2 re-attached for movement.");
             }
-            servo2.write(angle);
-            angle2 = angle;
-            servo2MoveTime = millis(); // Reset release timer
-            Serial.printf("Servo 2 target -> %d\n", angle);
+            servo2MoveTime = millis();
+            
+            Serial.printf("Both servos moved to -> %d\n", angle);
         }
         server.send(200, "text/plain", "OK");
     } else {
@@ -315,6 +328,7 @@ void setup() {
     server.on("/servo", handleServo);
     server.on("/trigger", handleTrigger);
     server.on("/setTriggerTime", handleSetTriggerTime);
+    server.on("/setTriggerPosition", handleSetTriggerPosition);
 
     server.begin();
     Serial.println("HTTP Server Started");
@@ -332,23 +346,32 @@ void loop() {
     // Servo 1: Trigger Logic
     // ===========================
     if (triggerActive) {
-        if (triggerStep == 0) {
-            servo1.write(180);
-            triggerStartTime = now;
-            triggerStep = 1;
-            Serial.println("Trigger: Moving to 180");
-        } 
-        else if (triggerStep == 1 && (now - triggerStartTime > triggerMoveTime)) { 
-            servo1.write(100);
-            triggerStartTime = now;
-            triggerStep = 2;
-            Serial.println("Trigger: Returning to 100");
-        } 
-        else if (triggerStep == 2 && (now - triggerStartTime > TRIGGER_RETURN_TIME)) {
-            triggerActive = false;
-            triggerStep = 0;
-            Serial.println("Trigger: Sequence Complete");
+        // Use the same logic as the slider for reliability
+        // Move both servos together using the same approach as handleServo()
+        
+        // Re-attach servo2 if needed (same as slider logic)
+        if (!servo2IsAttached) {
+            servo2.attach(SERVO2_PIN, 500, 2400);
+            servo2IsAttached = true;
+            Serial.println("Servo 2 re-attached for trigger.");
         }
+        
+        // Send commands 5 times for reliability
+        for (int i = 0; i < 5; i++) {
+            servo1.write(triggerPosition);
+            servo2.write(triggerPosition);
+            delay(10); // Small delay between commands
+        }
+        
+        // Update angle variables (same as slider logic)
+        angle1 = triggerPosition;
+        angle2 = triggerPosition;
+        
+        // Reset servo2 release timer (same as slider logic)
+        servo2MoveTime = millis();
+        
+        triggerActive = false;
+        Serial.printf("Trigger: Both servos moved to %d degrees (5x commands sent)\n", triggerPosition);
     }
 
     // ===========================
